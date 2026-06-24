@@ -66,6 +66,17 @@
   </div>
 
 <script>
+  // Zoom Apps SDK init
+const script = document.createElement('script');
+script.src = 'https://appssdk.zoom.us/sdk.js';
+script.onload = () => {
+  window.zoomSdk.config({
+    capabilities: [],
+    popupSize: { width: 480, height: 600 }
+  }).then(() => log('Zoom SDK initierad ✓'))
+    .catch(e => log('Zoom SDK fel: ' + e.message));
+};
+document.head.appendChild(script);
 const log = (...args) => {
   const pre = document.getElementById('log');
   pre.textContent += '[' + new Date().toISOString().slice(11,19) + '] ' + args.join(' ') + '\n';
