@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zoom Webview Camera Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; background: #0f0f0f; color: #eee; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+    .card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .status { display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0; font-size: 0.9rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #555; flex-shrink: 0; }
+    .dot.ok { background: #4caf50; }
+    .dot.fail { background: #f44336; }
+    .dot.warn { background: #ff9800; }
+    .dot.pending { background: #555; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    video { width: 100%; border-radius: 6px; background: #000; aspect-ratio: 16/9; }
+    select { background: #222; color: #eee; border: 1px solid #444; padding: 0.4rem 0.6rem; border-radius: 4px; width: 100%; margin-top: 0.5rem; }
+    button { background: #2563eb; color: #fff; border: none; padding: 0.5rem 1.2rem; border-radius: 6px; cursor: pointer; margin-top: 0.5rem; }
+    button:hover { background: #1d4ed8; }
+    pre { background: #0a0a0a; padding: 0.8rem; border-radius: 4px; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; color: #aaa; }
+    .section-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>📷 Zoom Webview Camera Test</h1>
+  <p style="color:#888;font-size:0.85rem">Öppna denna sida som Zoom App för att testa kameraåtkomst i webviewen.</p>
+
+  <!-- 1. Environment -->
+  <div class="card">
+    <div class="section-title">1. Miljö</div>
+    <div class="status"><div class="dot" id="d-ua"></div><span id="s-ua">Kontrollerar user agent…</span></div>
+    <div class="status"><div class="dot" id="d-webnn"></div><span id="s-webnn">Kontrollerar WebNN…</span></div>
+    <div class="status"><div class="dot" id="d-wasm"></div><span id="s-wasm">Kontrollerar WebAssembly…</span></div>
+    <div class="status"><div class="dot" id="d-webgl"></div><span id="s-webgl">Kontrollerar WebGL…</span></div>
+  </div>
+
+  <!-- 2. Camera enumeration -->
+  <div class="card">
+    <div class="section-title">2. Kameraåtkomst & enheter</div>
+    <div class="status"><div class="dot pending" id="d-perm"></div><span id="s-perm">Väntar på getUserMedia…</span></div>
+    <div class="status"><div class="dot" id="d-devices"></div><span id="s-devices">–</span></div>
+    <select id="camera-select" style="display:none"></select>
+    <button id="btn-start" onclick="startCamera()">Starta kamera</button>
+  </div>
+
+  <!-- 3. Live preview -->
+  <div class="card" id="video-card" style="display:none">
+    <div class="section-title">3. Live-bild</div>
+    <video id="video" autoplay muted playsinline></video>
+    <div class="status" style="margin-top:0.5rem"><div class="dot" id="d-stream"></div><span id="s-stream">–</span></div>
+  </div>
+
+  <!-- 4. ML inference test -->
+  <div class="card">
+    <div class="section-title">4. ML-inferens (WebNN / WASM fallback)</div>
+    <button onclick="testML()">Kör inferenstest</button>
+    <div class="status"><div class="dot" id="d-ml"></div><span id="s-ml">Inte testad</span></div>
+  </div>
+
+  <!-- Log -->
+  <div class="card">
+    <div class="section-title">Logg</div>
+    <pre id="log"></pre>
+  </div>
+
+<script>
+const log = (...args) => {
+  const pre = document.getElementById('log');
+  pre.textContent += '[' + new Date().toISOString().slice(11,19) + '] ' + args.join(' ') + '\n';
+  pre.scrollTop = pre.scrollHeight;
+};
+const set = (id, cls, text) => {
+  document.getElementById('d-' + id).className = 'dot ' + cls;
+  document.getElementById('s-' + id).textContent = text;
+};
+
+// --- 1. Environment ---
+(function detectEnv() {
+  const ua = navigator.userAgent;
+  log('UA:', ua);
+  const isZoom = /ZoomWebView|ZoomApps/i.test(ua);
+  set('ua', isZoom ? 'ok' : 'warn', isZoom ? 'Zoom WebView detekterad ✓' : 'Inte Zoom WebView (UA: ' + ua.slice(0, 60) + ')');
+
+  // WebNN
+  if ('ml' in navigator) {
+    set('webnn', 'ok', 'WebNN tillgänglig ✓');
+    log('WebNN: tillgänglig');
+  } else {
+    set('webnn', 'fail', 'WebNN saknas – ML körs på WASM');
+    log('WebNN: saknas');
+  }
+
+  // WASM
+  if (typeof WebAssembly !== 'undefined') {
+    set('wasm', 'ok', 'WebAssembly tillgänglig ✓');
+  } else {
+    set('wasm', 'fail', 'WebAssembly saknas');
+  }
+
+  // WebGL
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl2') || c.getContext('webgl');
+    set('webgl', gl ? 'ok' : 'fail', gl ? 'WebGL tillgänglig (' + gl.getParameter(gl.RENDERER) + ') ✓' : 'WebGL saknas');
+  } catch(e) { set('webgl', 'fail', 'WebGL error: ' + e.message); }
+})();
+
+// --- 2. Camera ---
+let stream = null;
+
+async function startCamera() {
+  log('Begär getUserMedia…');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    set('perm', 'ok', 'Kameratillstånd beviljat ✓');
+    log('getUserMedia: OK, tracks:', stream.getVideoTracks().map(t => t.label).join(', '));
+
+    // Enumerate after permission granted
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === 'videoinput');
+    log('Kameror hittade:', cameras.length, cameras.map(c => c.label).join(' | '));
+    set('devices', cameras.length > 0 ? 'ok' : 'warn', cameras.length + ' kamera(or) hittade');
+
+    const sel = document.getElementById('camera-select');
+    cameras.forEach(cam => {
+      const opt = document.createElement('option');
+      opt.value = cam.deviceId;
+      opt.textContent = cam.label || 'Kamera ' + cam.deviceId.slice(0, 6);
+      sel.appendChild(opt);
+    });
+    sel.style.display = cameras.length > 1 ? 'block' : 'none';
+    sel.onchange = () => switchCamera(sel.value);
+
+    showStream(stream);
+  } catch(e) {
+    set('perm', 'fail', 'Nekad: ' + e.name + ' – ' + e.message);
+    log('getUserMedia fel:', e.name, e.message);
+  }
+}
+
+async function switchCamera(deviceId) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  log('Byter kamera till deviceId:', deviceId.slice(0,8) + '…');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } });
+    showStream(stream);
+    log('Kamerabyte OK:', stream.getVideoTracks()[0].label);
+  } catch(e) {
+    log('Kamerabyte fel:', e.message);
+  }
+}
+
+function showStream(s) {
+  const vid = document.getElementById('video');
+  vid.srcObject = s;
+  document.getElementById('video-card').style.display = 'block';
+  const track = s.getVideoTracks()[0];
+  const settings = track.getSettings();
+  set('stream', 'ok', `Aktiv: ${track.label} – ${settings.width}×${settings.height} @ ${settings.frameRate?.toFixed(0)}fps`);
+  log('Stream aktiv:', JSON.stringify(settings));
+}
+
+// --- 4. ML inference test ---
+async function testML() {
+  set('ml', 'pending', 'Testar…');
+  log('Startar ML-test…');
+
+  // Try WebNN
+  if ('ml' in navigator) {
+    try {
+      const context = await navigator.ml.createContext({ deviceType: 'gpu' });
+      const builder = new MLGraphBuilder(context);
+      // Minimal op: add two constants
+      const a = builder.constant({ dataType: 'float32', dimensions: [4] }, new Float32Array([1,2,3,4]));
+      const b = builder.constant({ dataType: 'float32', dimensions: [4] }, new Float32Array([10,20,30,40]));
+      const c = builder.add(a, b);
+      const graph = await builder.build({ output: c });
+      const outputBuffer = new Float32Array(4);
+      await context.compute(graph, {}, { output: outputBuffer });
+      const ok = outputBuffer[0] === 11 && outputBuffer[3] === 44;
+      set('ml', ok ? 'ok' : 'fail', ok ? 'WebNN GPU-inferens OK ✓ [11,22,33,44]' : 'WebNN gav fel svar: ' + Array.from(outputBuffer));
+      log('WebNN result:', Array.from(outputBuffer));
+    } catch(e) {
+      log('WebNN fel:', e.message, '– faller tillbaka på WASM');
+      wasmFallbackTest();
+    }
+  } else {
+    wasmFallbackTest();
+  }
+}
+
+function wasmFallbackTest() {
+  // WASM: compile a minimal module (i32.add)
+  // wat: (module (func (export "add") (param i32 i32) (result i32) local.get 0 local.get 1 i32.add))
+  const wasmBytes = new Uint8Array([
+    0,97,115,109,1,0,0,0,1,7,1,96,2,127,127,1,127,3,2,1,0,
+    7,7,1,3,97,100,100,0,0,10,9,1,7,0,32,0,32,1,106,11
+  ]);
+  WebAssembly.instantiate(wasmBytes).then(({ instance }) => {
+    const result = instance.exports.add(17, 25);
+    const ok = result === 42;
+    set('ml', ok ? 'warn' : 'fail', ok ? 'WASM-fallback OK (inget WebNN) – add(17,25)=42 ✓' : 'WASM-fel: ' + result);
+    log('WASM add(17,25):', result);
+  }).catch(e => {
+    set('ml', 'fail', 'Både WebNN och WASM misslyckades: ' + e.message);
+    log('WASM fel:', e.message);
+  });
+}
+</script>
+</body>
+</html>
